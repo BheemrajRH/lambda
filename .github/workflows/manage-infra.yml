@@ -29,6 +29,8 @@ on:
         description: 'Branch of the source repo to checkout'
         required: true
         default: 'lambda'
+env:
+  AWS_REGION: us-east-1
 
 jobs:
   terraform:
