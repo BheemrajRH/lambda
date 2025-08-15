@@ -1,0 +1,85 @@
+name: lambda-manage-infra
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - uat
+          - prod
+      aws_region:
+        description: 'AWS Region'
+        required: true
+        default: 'us-east-1'
+      terraform_action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+      source_branch:
+        description: 'Branch of the source repo to checkout'
+        required: true
+        default: 'lambda'
+
+jobs:
+  terraform:
+    name: Run Terraform
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      TF_ACTION: ${{ inputs.terraform_action }}
+    steps:
+      - name: Checkout lambda repo
+        uses: actions/checkout@v4
+
+      - name: Checkout Operationautomation repo
+        uses: actions/checkout@v4
+        with:
+          repository: BheemrajRH/Operationautomation
+          ref: ${{ inputs.source_branch }}
+          token: ${{ secrets.GH_PAT }}
+          path: tf-source
+
+      - name: List files in source repo
+        run: ls -la tf-source/terraform/env/${ENVIRONMENT}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform -chdir=tf-source/terraform/env/${ENVIRONMENT} init -backend-config="key=lambda/${ENVIRONMENT}.tfstate" -input=false
+
+      - name: Terraform Action
+        run: |
+          if [[ "$TF_ACTION" == "plan" ]]; then
+            terraform -chdir=tf-source/terraform/env/${ENVIRONMENT} plan -var-file=${ENVIRONMENT}.tfvars -input=false
+          elif [[ "$TF_ACTION" == "apply" ]]; then
+            terraform -chdir=tf-source/terraform/env/${ENVIRONMENT} apply -auto-approve -var-file=${ENVIRONMENT}.tfvars -input=false
+          elif [[ "$TF_ACTION" == "destroy" ]]; then
+            terraform -chdir=tf-source/terraform/env/${ENVIRONMENT} destroy -auto-approve -var-file=${ENVIRONMENT}.tfvars -input=false
+          else
+            echo "Unsupported action: $TF_ACTION"
+            exit 1
+          fi
